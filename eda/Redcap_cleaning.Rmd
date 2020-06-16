@@ -1,0 +1,407 @@
+---
+title: "Sars_initial_check"
+author: "Chris LeBoa"
+date: "5/22/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("RCurl")
+library(tidyverse)
+library(RCurl)
+library(ggmap)
+library(leaflet)
+library(sf)
+library(USAboundaries)
+library(leaflet.extras)
+data <- read_csv("/Users/ChrisLeBoa/Downloads/SARSCoV2Transmission_DATA_2020-05-22_1254.csv")
+
+glimpse(data)
+
+occupoation_types_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/occupations_raw.csv"
+trip_locations_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/travel_locations_raw.csv"
+transport_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/transport_other_raw.csv"
+
+output_file <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data/clean_travel_vars_20200612.csv"
+```
+
+#API Export 
+```{r}
+
+travel_phone <- postForm(
+  uri='https://redcap.stanford.edu/api/',
+  token='0AF77C06732E8B075AB460C3C45F8C73',
+  content='report',
+  format='csv',
+  report_id='69901',
+  csvDelimiter='',
+  rawOrLabel='raw',
+  rawOrLabelHeaders='raw',
+  exportCheckboxLabel='false',
+  returnFormat='csv'
+)
+
+travel_eform <- postForm(
+  uri='https://redcap.stanford.edu/api/',
+  token='0AF77C06732E8B075AB460C3C45F8C73',
+  content='report',
+  format='csv',
+  report_id='69902',
+  csvDelimiter='',
+  rawOrLabel='raw',
+  rawOrLabelHeaders='raw',
+  exportCheckboxLabel='false',
+  returnFormat='csv'
+)
+
+
+```
+
+#Read in data as tables 
+```{r}
+data_phone <- 
+  read_csv(travel_phone) %>%
+  filter(is.na(redcap_repeat_instrument)) %>% 
+  rename_all(~str_remove(., "_e"))
+
+
+data_eform <- 
+  read_csv(travel_eform) %>%
+  filter(is.na(redcap_repeat_instrument)) %>% 
+  rename_all(~str_remove(., "_e"))
+
+data_travel <- 
+  data_phone %>% 
+  bind_rows(data_eform)
+```
+#EDA of trips
+```{r}
+
+```
+
+#Occupations
+```{r}
+occupation_types <- 
+  data_travel %>% 
+  filter(biohub_seq == 1) %>% 
+  mutate_at(vars(occupation), str_to_lower) %>% 
+  mutate(
+    occupation_type = case_when(
+      str_detect(occupation, "retired") == TRUE ~ "retired", 
+      str_detect(occupation, "student") == TRUE ~ "student",
+      str_detect(occupation, "teacher|professor|school") == TRUE ~ "school employee",
+      str_detect(occupation, "doctor|nurse|medical") == TRUE ~ "healthcare worker", 
+      str_detect(occupation, "airline|flight|pilot") == TRUE ~ "airline worker", 
+      str_detect(occupation, "fire|police|emt|paramedic") == TRUE ~ "first responder", 
+      str_detect(occupation, "none|housewife|unemployed|mom|not currently employed") == TRUE ~ "not working",
+      is.na(occupation) == TRUE ~ NA_character_,
+      TRUE ~ "ohter_professional"), 
+  ) 
+  
+  occupation_types %>% 
+  count(occupation_type) %>%
+  arrange(desc(n))
+
+occupation_types
+
+```
+
+#Travel Locations
+```{r}
+
+travel_locations <- 
+  occupation_types %>%
+   filter(biohub_seq == 1) %>% 
+  pivot_longer(
+    cols = ends_with("_location"),
+    names_to = "trip_number",
+    names_prefix = "trip_",
+    values_to = "location") %>% 
+  mutate(
+    location = case_when(
+      str_detect(location, "LA|Los Angeles") == TRUE ~ "Los Angeles, California", 
+      str_detect(.$location, "Lake Tahoe") == TRUE ~ "Lake Tahoe, California", 
+      str_detect(.$location, "London") == TRUE ~ "London, UK", 
+      str_detect(.$location, "New York|NYC|nyc|new york") == TRUE ~ "New York, New York",
+      str_detect(.$location, "Teaneck NJ") == TRUE ~ "Teaneck, New Jersey",
+      str_detect(.$location, "Palm Springs") == TRUE ~ "Palm Springs, California",
+      str_detect(.$location, "Vail|Veil") == TRUE ~ "Vail, Colorado",
+      str_detect(.$location, "Las Vegas") == TRUE ~ "Las Vegas, Nevada",
+      str_detect(.$location, "Buenos") == TRUE ~ "Beunos Aires, Argentina",
+      str_detect(.$location, "Amsterdam") == TRUE ~ "Amsterdam, Belgium",
+      str_detect(.$location, "Teracce") == TRUE ~ "Terrace, Canada",
+      str_detect(.$location, "Paris") == TRUE ~ "Paris, France",
+      str_detect(.$location, "Cayman Islands") == TRUE ~ ", Cayman Islands",
+      str_detect(.$location, "San Francisco") == TRUE ~ "San Francisco, California",
+      str_detect(.$location, "Salt Lake| Late") == TRUE ~ "Salt Lake City, Utah",
+      str_detect(.$location, "Sacromento") == TRUE ~ "Sacromento, California",
+      str_detect(.$location, "Merced County") == TRUE ~ "Merced, California",
+      str_detect(.$location, "Reno") == TRUE ~ "Reno, Nevada",
+      str_detect(.$location, "DC") == TRUE ~ "Washington D.C., Washington D.C.",
+      TRUE ~ location
+    )  ,
+    city_travel = str_extract(location, "^[^,|\\-]*"), 
+    state_country = str_extract(location, "(?<=\\,).*")
+  ) %>% 
+  mutate(
+    state = 
+      case_when(
+        str_detect(.$state_country, "CO|co|Co") == TRUE ~ "Colorado", 
+        str_detect(.$state_country, "AZ") == TRUE ~ "Arizona", 
+        str_detect(.$state_country, "NJ") == TRUE ~ "New Jersey",
+        str_detect(.$state_country, "TX") == TRUE ~ "Texas",
+        str_detect(.$state_country, "OH|Oh|oh") == TRUE ~ "Ohio",
+        str_detect(.$state_country, "FL") == TRUE ~ "Florida",
+        str_detect(.$state_country, "IL") == TRUE ~ "Illinois",
+        str_detect(.$state_country, "HI") == TRUE ~ "Hawaii",
+        str_detect(.$state_country, "CA|ca|Ca") == TRUE ~ "California", 
+        TRUE ~ state_country
+      )
+   ) %>% 
+   pivot_wider(names_from = trip_number, values_from = c(location, city_travel, state_country, state)) %>% 
+  mutate(
+    travel_california = case_when(
+      str_detect(location_trip1_location, "CA|ca|Ca|California") == TRUE ~ 1,
+      str_detect(location_trip2_location, "CA|ca|Ca|California") == TRUE ~ 1,
+      str_detect(location_trip3_location, "CA|ca|Ca|California") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ),
+    travel_california_los_angeles = case_when(
+      str_detect(location_trip1_location, "LA|Los Angeles") == TRUE ~ 1,
+      str_detect(location_trip2_location, "LA|Los Angeles") == TRUE ~ 1,
+      str_detect(location_trip3_location, "LA|Los Angeles") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ),
+    travel_california_lake_tahoe = case_when(
+      str_detect(location_trip1_location, "Lake Tahoe") == TRUE ~ 1,
+      str_detect(location_trip2_location, "Lake Tahoe") == TRUE ~ 1,
+      str_detect(location_trip3_location, "Lake Tahoe") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ),
+    travel_colorado = case_when(
+      str_detect(location_trip1_location, "CO|co|Co|Vail|Denver|Colorado") == TRUE ~ 1,
+      str_detect(location_trip2_location, "CO|co|Co|Vail|Denver|Colorado") == TRUE ~ 1,
+      str_detect(location_trip3_location, "CO|co|Co|Vail|Denver|Colorado") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ), 
+    travel_newyork = case_when(
+      str_detect(location_trip1_location, "NYC|nyc|NY|New York") == TRUE ~ 1,
+      str_detect(location_trip2_location, "NYC|nyc|NY|New York") == TRUE ~ 1,
+      str_detect(location_trip3_location, "NYC|nyc|NY|New York") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ), 
+    travel_washington_state = case_when(  #This variable needs some work
+      str_detect(location_trip1_location, "Seattle|Washington State|Kern") == TRUE ~ 1,
+      str_detect(location_trip2_location, "Seattle|Washington State|Kern") == TRUE ~ 1,
+      str_detect(location_trip3_location, "Seattle|Washington State|Kern") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ), 
+    travel_europe = case_when(  #This variable needs some work
+      str_detect(location_trip1_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland") == TRUE ~ 1,
+      str_detect(location_trip2_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland") == TRUE ~ 1,
+      str_detect(location_trip3_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ), 
+    travel_asia = case_when(  #This variable needs some work
+      str_detect(location_trip1_location, "China|Japan|Korea|Philippines|Taiwan|Thailand") == TRUE ~ 1,
+      str_detect(location_trip2_location, "China|Japan|Korea|Philippines|Taiwan|Thailand") == TRUE ~ 1,
+      str_detect(location_trip3_location, "China|Japan|Korea|Philippines|Taiwan|Thailand") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ), 
+   travel_other_us = case_when(  #This variable needs some work
+      str_detect(location_trip1_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota") == TRUE ~ 1,
+      str_detect(location_trip2_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota") == TRUE ~ 1,
+      str_detect(location_trip3_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota") == TRUE ~ 1,
+      TRUE ~ 0                                          
+    ), 
+  )
+
+travel_locations
+
+  
+
+
+# 1, Air
+# 2, Cruise
+# 3, Train
+# 4, Car
+# 5, Bus
+# 98, Other
+```
+#Transit Options 
+```{r}
+travel_locations_updated_transit <- 
+  travel_locations %>% 
+  # pivot_longer(
+  #   cols = starts_with("trip") & ends_with("_other"),
+  #   names_to = "trip_number",
+  #   names_prefix = "trip_",
+  #   values_to = "transportation"
+  #   ) %>% 
+  # mutate(
+  #   transportation = str_to_lower(transportation), 
+  #   rideshare = if_else(str_detect(transportation, "rideshare|ride share|uber|lyft") == TRUE, 1, 0),
+  #   subway = if_else(str_detect(transportation, "subway|underground|metro") == TRUE, 1, 0), 
+  #   plane = if_else(str_detect(transportation, "air|plane|flight") == TRUE, 1, 0), 
+  #   chairlift = if_else(str_detect(transportation, "chair lift|chairlift") == TRUE, 1, 0), 
+  # ) %>% 
+  # pivot_wider(names_from = trip_number, values_from = c(transportation, rideshare, subway, plane, chairlift)) %>% 
+  mutate(
+    plane = 
+      case_when(
+      str_detect(trip1_transportation_other, "air|plane|flight") == TRUE ~ 1, 
+      str_detect(trip2_transportation_other, "air|plane|flight") == TRUE ~ 1, 
+      str_detect(trip3_transportation_other, "air|plane|flight") == TRUE ~ 1, 
+      str_detect(public_transport_other, "air|plane|flight") == TRUE ~ 1, 
+      str_detect(as.character(trip1_transportation), "1") == TRUE ~ 1,
+      str_detect(as.character(trip2_transportation), "1") == TRUE ~ 1,
+      str_detect(as.character(trip3_transportation), "1") == TRUE ~ 1,
+      TRUE ~ 0
+      ), 
+    train = 
+      case_when(
+      str_detect(as.character(trip1_transportation), "3") == TRUE ~ 1,
+      str_detect(as.character(trip2_transportation), "3") == TRUE ~ 1,
+      str_detect(as.character(trip3_transportation), "3") == TRUE ~ 1,
+      str_detect(as.character(public_transport), "2|4") == TRUE ~ 1,
+      str_detect(as.character(public_transport_other), "train") == TRUE ~ 1,
+      TRUE ~ 0
+      ), 
+    muni_train = 
+      case_when(
+      str_detect(as.character(public_transport), "2") == TRUE ~ 1,
+      TRUE ~ 0
+      ), 
+    cal_train = 
+      case_when(
+      str_detect(as.character(public_transport), "4") == TRUE ~ 1,
+      TRUE ~ 0
+      ), 
+    cruise = 
+      case_when(
+      str_detect(as.character(trip1_transportation), "2") == TRUE ~ 1,
+      str_detect(as.character(trip2_transportation), "2") == TRUE ~ 1,
+      str_detect(as.character(trip3_transportation), "2") == TRUE ~ 1,
+      TRUE ~ 0
+      ), 
+    car = 
+      case_when(
+      str_detect(trip1_transportation_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1, 
+      str_detect(trip2_transportation_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1, 
+      str_detect(trip3_transportation_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1, 
+      str_detect(as.character(public_transport), "4") == TRUE ~ 1,
+      str_detect(public_transport_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1,
+      str_detect(as.character(trip1_transportation), "4") == TRUE ~ 1,
+      str_detect(as.character(trip2_transportation), "4") == TRUE ~ 1,
+      str_detect(as.character(trip3_transportation), "4") == TRUE ~ 1,
+      TRUE ~ 0
+      ), 
+    rideshare = 
+      case_when(
+      str_detect(as.character(public_transport), "5") == TRUE ~ 1,
+      str_detect(public_transport_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1, 
+      str_detect(trip1_transportation_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1, 
+      str_detect(trip2_transportation_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1, 
+      str_detect(trip3_transportation_other, "rideshare|ride share|uber|lyft") == TRUE ~ 1, 
+      TRUE ~ 0
+      ), 
+    chairlift = 
+      case_when(
+      str_detect(public_transport_other, "chair lift|chairlift") == TRUE ~ 1, 
+      str_detect(trip1_transportation_other, "chair lift|chairlift") == TRUE ~ 1, 
+      str_detect(trip2_transportation_other, "chair lift|chairlift") == TRUE ~ 1, 
+      str_detect(trip3_transportation_other, "chair lift|chairlift") == TRUE ~ 1, 
+      TRUE ~ 0
+      ), 
+    subway =  #Not just new york subway but any sort of metro 
+      case_when(
+      str_detect(as.character(public_transport), "1") == TRUE ~ 1,
+      str_detect(public_transport_other, "subway|underground|metro") == TRUE ~ 1, 
+      str_detect(trip1_transportation_other, "subway|underground|metro") == TRUE ~ 1, 
+      str_detect(trip2_transportation_other, "subway|underground|metro") == TRUE ~ 1, 
+      str_detect(trip3_transportation_other, "subway|underground|metro") == TRUE ~ 1, 
+      TRUE ~ 0
+      ), 
+    bus = 
+      case_when(
+      str_detect(as.character(public_transport), "3") == TRUE ~ 1,
+      str_detect(public_transport_other, "bus") == TRUE ~ 1, 
+      str_detect(as.character(trip1_transportation), "5") == TRUE ~ 1,
+      str_detect(as.character(trip2_transportation), "5") == TRUE ~ 1,
+      str_detect(as.character(trip3_transportation), "5") == TRUE ~ 1,
+      str_detect(trip1_transportation_other, "bus") == TRUE ~ 1, 
+      str_detect(trip2_transportation_other, "bus") == TRUE ~ 1, 
+      str_detect(trip3_transportation_other, "bus") == TRUE ~ 1, 
+      TRUE ~ 0
+      )
+  )
+```
+
+#Same address
+```{r}
+address_check <- 
+  travel_locations_updated_transit %>% 
+  mutate(
+    address_match = if_else(str_extract(address, "\\d+") == str_extract(residential_address, "\\d+"), 1, 0), 
+    address_use = 
+      case_when(
+      address_match == 1 ~ str_glue("{address}, {city}, CA"),
+      
+      TRUE ~ residential_address
+      ), 
+     address_use = case_when(
+     is.na(address_use) ~ str_glue("{address}, {city}, CA"),
+     str_detect(address_use, "2 Gold St Apt 911, New York, CA") == TRUE 
+     ~ "2 Gold St Apt 911, New York, New York",
+     str_detect(address_use, "3354 Brichar Way") == TRUE 
+     ~ "3354 Brichar Way, Columbus, Ohio",
+     str_detect(address_use, ",") == FALSE ~ str_glue("{address}, {city}, CA"),
+     TRUE ~ address_use
+  )) %>% 
+  drop_na(address_use) %>% 
+  mutate_geocode(address_use, output = "latlona") %>% 
+  mutate(
+    city_use = address1
+  )
+  
+
+
+#The numbers for 42 addresses match - 10 do not 
+
+
+leaflet(address_check) %>%
+  addTiles() %>%
+  addMarkers(
+    ~lon,
+    ~lat,
+    #label = ~count(address_check$address_use)),
+    labelOptions = labelOptions(noHide = F),
+    clusterOptions = markerClusterOptions()
+    )
+```
+
+```{r}
+data %>% 
+  filter(!is.na(hospital_name_e )) %>% 
+  select(hospital_name_e, hospital_loc_e)
+
+data %>% 
+  filter(!is.na(n_trips_e)) %>% 
+  select(n_trips_e, trip1_location_e)
+
+data %>% 
+  filter(str_detect(study_interest_e, "yes|Yes")) %>% 
+  select(study_interest_e , email) %>% 
+  write_csv("/Users/ChrisLeBoa/Downloads/emails.csv")
+```
+
+```{r}
+address_check %>% 
+  count(travel_california_los_angeles)
+
+
+address_check %>% 
+  write_csv(output_file)
+```
+

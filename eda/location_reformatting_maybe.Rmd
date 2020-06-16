@@ -1,0 +1,174 @@
+---
+title: "Sars_initial_check"
+author: "Chris LeBoa"
+date: "5/22/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("RCurl")
+library(tidyverse)
+library(RCurl)
+data <- read_csv("/Users/ChrisLeBoa/Downloads/SARSCoV2Transmission_DATA_2020-05-22_1254.csv")
+
+glimpse(data)
+
+occupoation_types_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/occupations_raw.csv"
+trip_locations_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/travel_locations_raw.csv"
+transport_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/transport_other_raw.csv"
+```
+
+#API Export 
+```{r}
+
+travel_phone <- postForm(
+    uri='https://redcap.stanford.edu/api/',
+    token='0AF77C06732E8B075AB460C3C45F8C73',
+    content='report',
+    format='csv',
+    report_id='69901',
+    csvDelimiter='',
+    rawOrLabel='raw',
+    rawOrLabelHeaders='raw',
+    exportCheckboxLabel='false',
+    returnFormat='csv'
+)
+
+travel_eform <- postForm(
+    uri='https://redcap.stanford.edu/api/',
+    token='0AF77C06732E8B075AB460C3C45F8C73',
+    content='report',
+    format='csv',
+    report_id='69902',
+    csvDelimiter='',
+    rawOrLabel='raw',
+    rawOrLabelHeaders='raw',
+    exportCheckboxLabel='false',
+    returnFormat='csv'
+)
+
+
+```
+
+#Read in data as tables 
+```{r}
+data_phone <- 
+  read_csv(travel_phone) %>%
+    filter(is.na(redcap_repeat_instrument)) %>% 
+  rename_all(~str_remove(., "_e"))
+
+
+data_eform <- 
+  read_csv(travel_eform) %>%
+    filter(is.na(redcap_repeat_instrument)) %>% 
+  rename_all(~str_remove(., "_e"))
+
+data_travel <- 
+  data_phone %>% 
+  bind_rows(data_eform)
+```
+#EDA of trips
+```{r}
+
+```
+
+#Occupations
+```{r}
+occupation_types <- 
+  data_travel %>% 
+  mutate_at(vars(occupation), str_to_lower) %>% 
+  count(occupation) %>%
+  arrange(desc(n)) %>% 
+  write_csv(occupoation_types_output)
+
+
+
+```
+
+#Travel Locations
+```{r}
+
+travel_locations <- 
+  data_travel %>% 
+  pivot_longer(
+    cols = ends_with("_location"),
+    names_to = "trip_number",
+    names_prefix = "trip_",
+    values_to = "location") %>% 
+  drop_na(location) %>% 
+  mutate(
+    location = case_when(
+    str_detect(location, "LA") == TRUE ~ "Los Angeles, California", 
+    str_detect(.$location, "Lake Tahoe") == TRUE ~ "Lake Tahoe, California", 
+    str_detect(.$location, "London") == TRUE ~ "London, UK", 
+    str_detect(.$location, "New York|NYC|nyc") == TRUE ~ "New York, New York",
+    str_detect(.$location, "New York|NYC|nyc") == TRUE ~ "New York, New York",
+    TRUE ~ location
+  ),
+    city = str_extract(location, "^[^,|/]*"), 
+    state_country = str_extract(location, "([^,|/]*)")
+  )
+  
+travel_locations %>% 
+  count(city) %>% 
+  arrange(desc(n))
+
+travel_locations %>% 
+  count(state_country) %>% 
+  arrange(desc(n)) %>% 
+  write_csv(trip_locations_output)
+
+# travel_locations %>% 
+#   mutate(
+#     location = case_when(
+#     str_detect(location, "LA") == TRUE ~ "Los Angeles, California", 
+#     str_detect(.$location, "Lake Tahoe") == TRUE ~ "Lake Tahoe, California", 
+#     str_detect(.$location, "London") == TRUE ~ "London, UK", 
+#     TRUE ~ location
+#   )
+#   )
+
+```
+#Transit Options 
+```{r}
+transit_options <- 
+  data_travel %>% 
+  pivot_longer(cols = ends_with("_other"), names_to = "trip_number", names_prefix = "trip_", values_to = "transportation") %>% 
+  drop_na(transportation) %>% 
+  count(transportation) %>% 
+  arrange(desc(n))
+
+transit_options %>%  
+  write_csv(transport_output)
+  
+```
+
+#Same address
+```{r}
+address <- 
+  data_travel %>% 
+  drop_na(address) %>% 
+  count(address) %>% 
+  arrange(desc(n))
+
+transit_options %>%  
+  write_csv(transport_output)
+  
+```
+
+```{r}
+data %>% 
+  filter(!is.na(hospital_name_e )) %>% 
+  select(hospital_name_e, hospital_loc_e)
+
+data %>% 
+  filter(!is.na(n_trips_e)) %>% 
+  select(n_trips_e, trip1_location_e)
+
+data %>% 
+  filter(str_detect(study_interest_e, "yes|Yes")) %>% 
+  select(study_interest_e , email) %>% 
+  write_csv("/Users/ChrisLeBoa/Downloads/emails.csv")
+```
+

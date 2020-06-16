@@ -1,0 +1,193 @@
+---
+title: "Sars_initial_check"
+author: "Chris LeBoa"
+date: "5/22/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("RCurl")
+library(tidyverse)
+library(RCurl)
+data <- read_csv("/Users/ChrisLeBoa/Downloads/SARSCoV2Transmission_DATA_2020-05-22_1254.csv")
+
+glimpse(data)
+
+occupoation_types_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/occupations_raw.csv"
+trip_locations_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/travel_locations_raw.csv"
+transport_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/transport_other_raw.csv"
+```
+
+#API Export 
+```{r}
+
+travel_phone <- postForm(
+    uri='https://redcap.stanford.edu/api/',
+    token='0AF77C06732E8B075AB460C3C45F8C73',
+    content='report',
+    format='csv',
+    report_id='69900',
+    csvDelimiter='',
+    rawOrLabel='raw',
+    rawOrLabelHeaders='raw',
+    exportCheckboxLabel='false',
+    returnFormat='csv'
+)
+
+travel_eform <- postForm(
+    uri='https://redcap.stanford.edu/api/',
+    token='0AF77C06732E8B075AB460C3C45F8C73',
+    content='report',
+    format='csv',
+    report_id='70105',
+    csvDelimiter='',
+    rawOrLabel='raw',
+    rawOrLabelHeaders='raw',
+    exportCheckboxLabel='false',
+    returnFormat='csv'
+)
+
+
+```
+
+#Read in data as tables 
+```{r}
+data_phone <- 
+  read_csv(travel_phone) %>%
+    filter(is.na(redcap_repeat_instrument)) %>% 
+  rename_all(~str_remove(., "_e"))
+
+
+data_eform <- 
+  read_csv(travel_eform) %>%
+    filter(is.na(redcap_repeat_instrument)) %>% 
+  rename_all(~str_remove(., "_e"))
+
+data_travel <- 
+  data_phone %>% 
+  bind_rows(data_eform)
+```
+#EDA of trips
+```{r}
+seq_data <- 
+data_travel %>% 
+  filter(!is.na(biohub_seq)) %>% 
+  view()
+  
+```
+
+#Occupations
+```{r}
+occupation_types <- 
+  seq_data %>% 
+  filter(biohub_seq ==1) %>% 
+  drop_na(occupation) %>% 
+  mutate_at(vars(occupation), str_to_lower) %>% 
+  count(occupation) %>%
+  arrange(desc(n)) %>% 
+  write_csv(occupoation_types_output)
+
+
+
+```
+
+#Travel Locations
+```{r}
+
+travel_locations <- 
+  seq_data %>% 
+  filter(biohub_seq ==1) %>% 
+  pivot_longer(
+    cols = ends_with("_location"),
+    names_to = "trip_number",
+    names_prefix = "trip_",
+    values_to = "location") %>% 
+  drop_na(location) %>% 
+  mutate(
+    location = case_when(
+    str_detect(location, "LA|Los Angeles") == TRUE ~ "Los Angeles, California", 
+    str_detect(.$location, "Lake Tahoe") == TRUE ~ "Lake Tahoe, California", 
+    str_detect(.$location, "London") == TRUE ~ "London, UK", 
+    str_detect(.$location, "New York|NYC|nyc") == TRUE ~ "New York, New York",
+    str_detect(.$location, "Teaneck NJ") == TRUE ~ "Teaneck, New Jersey",
+    str_detect(.$location, "Palm Springs") == TRUE ~ "Palm Springs, California",
+    str_detect(.$location, "Vail|Veil") == TRUE ~ "Vail, Colorado",
+    str_detect(.$location, "Amsterdam") == TRUE ~ "Amsterdam, Belgium",
+    str_detect(.$location, "Teracce") == TRUE ~ "Terrace, Canada",
+    str_detect(.$location, "Paris") == TRUE ~ "Paris, France",
+    str_detect(.$location, "Cayman Islands") == TRUE ~ ", Cayman Islands",
+    str_detect(.$location, "San Francisco") == TRUE ~ "San Francisco, California",
+    str_detect(.$location, "Salt Lake| Late") == TRUE ~ "Salt Lake City, Utah",
+    str_detect(.$location, "Sacromento") == TRUE ~ "Sacromento, California",
+    str_detect(.$location, "Merced County") == TRUE ~ "Merced, California",
+     str_detect(.$location, "Reno") == TRUE ~ "Reno, Nevada",
+    TRUE ~ location
+  ),
+    city = str_extract(location, "^[^,|\\-]*"), 
+    state_country = str_extract(location, "(?<=\\,).*")
+  )
+  
+travel_locations %>% 
+  count(location) %>% 
+  arrange(desc(n))
+
+# travel_locations %>% 
+#   count(state_country) %>% 
+#   arrange(desc(n))
+
+# travel_locations %>% 
+#   mutate(
+#     location = case_when(
+#     str_detect(location, "LA") == TRUE ~ "Los Angeles, California", 
+#     str_detect(.$location, "Lake Tahoe") == TRUE ~ "Lake Tahoe, California", 
+#     str_detect(.$location, "London") == TRUE ~ "London, UK", 
+#     TRUE ~ location
+#   )
+#   )
+
+```
+#Transit Options 
+```{r}
+transit_options <- 
+  data_travel %>% 
+  pivot_longer(cols = ends_with("_other"), names_to = "trip_number", names_prefix = "trip_", values_to = "transportation") %>% 
+  drop_na(transportation) %>% 
+  count(transportation) %>% 
+  arrange(desc(n))
+
+transit_options %>%  
+  write_csv(transport_output)
+  
+```
+
+#Same address
+```{r}
+address <- 
+  seq_data %>% 
+  drop_na(address) %>% 
+  count(address) %>% 
+  arrange(desc(n))
+
+transit_options %>%  
+  write_csv(transport_output)
+
+seq_data %>% 
+  count(mrn)
+```
+
+```{r}
+data %>% 
+  filter(!is.na(hospital_name_e )) %>% 
+  select(hospital_name_e, hospital_loc_e)
+
+data %>% 
+  filter(!is.na(n_trips_e)) %>% 
+  select(n_trips_e, trip1_location_e)
+
+data %>% 
+  filter(str_detect(study_interest_e, "yes|Yes")) %>% 
+  select(study_interest_e , email) %>% 
+  write_csv("/Users/ChrisLeBoa/Downloads/emails.csv")
+```
+
