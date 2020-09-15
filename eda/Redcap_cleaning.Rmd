@@ -23,7 +23,7 @@ occupoation_types_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/o
 trip_locations_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/travel_locations_raw.csv"
 transport_output <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data-raw/transport_other_raw.csv"
 
-output_file <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data/clean_travel_vars_20200612.csv"
+output_file <- "/Users/ChrisLeBoa/GitHub/corona_genomics/data/clean_travel_vars_20200910.csv"
 ```
 
 #API Export 
@@ -75,35 +75,43 @@ data_travel <-
   data_phone %>% 
   bind_rows(data_eform)
 ```
-#EDA of trips
-```{r}
 
+
+```{r}
+# glimpse(data_travel)
+# 
+# table(data_travel$biohub_seq)
 ```
 
 #Occupations
 ```{r}
+
+
 occupation_types <- 
   data_travel %>% 
-  filter(biohub_seq == 1) %>% 
+  #filter(!is.na(biohub_seq)) %>% 
   mutate_at(vars(occupation), str_to_lower) %>% 
   mutate(
     occupation_type = case_when(
-      str_detect(occupation, "retired") == TRUE ~ "retired", 
       str_detect(occupation, "student") == TRUE ~ "student",
-      str_detect(occupation, "teacher|professor|school") == TRUE ~ "school employee",
-      str_detect(occupation, "doctor|nurse|medical") == TRUE ~ "healthcare worker", 
-      str_detect(occupation, "airline|flight|pilot") == TRUE ~ "airline worker", 
-      str_detect(occupation, "fire|police|emt|paramedic") == TRUE ~ "first responder", 
-      str_detect(occupation, "none|housewife|unemployed|mom|not currently employed") == TRUE ~ "not working",
-      is.na(occupation) == TRUE ~ NA_character_,
-      TRUE ~ "ohter_professional"), 
+       str_detect(occupation, "teacher|professor|school|university") == TRUE ~ "school employee",
+      str_detect(occupation, "^rn|nurse|medical|surgeon|physician|clinic assistant|doctor|dialysis|old folks home|oa-iv|radiologic|pa|optometrist|cna") == TRUE ~ "healthcare worker", 
+       str_detect(occupation, "airline|flight|pilot") == TRUE ~ "airline worker", 
+       str_detect(
+         occupation,
+        "fire|police|emt|paramedic|doctor") == TRUE ~ "first responder",
+      str_detect(
+         occupation,
+         "none|housewife|unemployed|mom|no work |no work|not currently employed|homeschooling mother|home|not fixed employment|not fixed employment|no trabajo|no work") == TRUE ~ "not working",
+        str_detect(occupation, "retired") == TRUE ~ "retired",
+       is.na(occupation) |  str_detect(occupation, "n/a") == TRUE ~ NA_character_,
+      TRUE ~ "other professional")
   ) 
-  
   occupation_types %>% 
   count(occupation_type) %>%
   arrange(desc(n))
 
-occupation_types
+
 
 ```
 
@@ -112,7 +120,6 @@ occupation_types
 
 travel_locations <- 
   occupation_types %>%
-   filter(biohub_seq == 1) %>% 
   pivot_longer(
     cols = ends_with("_location"),
     names_to = "trip_number",
@@ -132,6 +139,7 @@ travel_locations <-
       str_detect(.$location, "Amsterdam") == TRUE ~ "Amsterdam, Belgium",
       str_detect(.$location, "Teracce") == TRUE ~ "Terrace, Canada",
       str_detect(.$location, "Paris") == TRUE ~ "Paris, France",
+      str_detect(.$location, "Hawaiian Islands") == TRUE ~ "Hawaii",
       str_detect(.$location, "Cayman Islands") == TRUE ~ ", Cayman Islands",
       str_detect(.$location, "San Francisco") == TRUE ~ "San Francisco, California",
       str_detect(.$location, "Salt Lake| Late") == TRUE ~ "Salt Lake City, Utah",
@@ -198,9 +206,9 @@ travel_locations <-
       TRUE ~ 0                                          
     ), 
     travel_europe = case_when(  #This variable needs some work
-      str_detect(location_trip1_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland") == TRUE ~ 1,
-      str_detect(location_trip2_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland") == TRUE ~ 1,
-      str_detect(location_trip3_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland") == TRUE ~ 1,
+      str_detect(location_trip1_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland|Turkey") == TRUE ~ 1,
+      str_detect(location_trip2_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland|Turkey") == TRUE ~ 1,
+      str_detect(location_trip3_location, "France|Spain|UK|London|Belgium|Portugual|Italy|Ireland|Turkey") == TRUE ~ 1,
       TRUE ~ 0                                          
     ), 
     travel_asia = case_when(  #This variable needs some work
@@ -210,14 +218,16 @@ travel_locations <-
       TRUE ~ 0                                          
     ), 
    travel_other_us = case_when(  #This variable needs some work
-      str_detect(location_trip1_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota") == TRUE ~ 1,
-      str_detect(location_trip2_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota") == TRUE ~ 1,
-      str_detect(location_trip3_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota") == TRUE ~ 1,
+      str_detect(location_trip1_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota|Hawaii|Miami|Oregon|Ohio|Nevada") == TRUE ~ 1,
+      str_detect(location_trip2_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota|Hawaii||Miami|Oregon|Ohio||Nevada") == TRUE ~ 1,
+      str_detect(location_trip3_location, "Nevada|NV|TX|OH|FL|NJ|Idaho|Utah|South Dakota|Hawaii||Miami|Oregon|Ohio|Nevada") == TRUE ~ 1,
       TRUE ~ 0                                          
     ), 
   )
 
-travel_locations
+# travel_locations %>% 
+#   select(location_trip1_location, location_trip2_location, location_trip3_location, starts_with("travel")) %>% 
+#   view()
 
   
 
@@ -340,31 +350,32 @@ travel_locations_updated_transit <-
 
 #Same address
 ```{r}
-address_check <- 
+address_check <-
   travel_locations_updated_transit %>% 
   mutate(
     address_match = if_else(str_extract(address, "\\d+") == str_extract(residential_address, "\\d+"), 1, 0), 
     address_use = 
       case_when(
-      address_match == 1 ~ str_glue("{address}, {city}, CA"),
-      
-      TRUE ~ residential_address
-      ), 
+    address_match == 1 ~ str_glue("{address}, {city}, CA"),
+      str_detect(residential_address, "3354 Brichar Way") == TRUE 
+    ~ "3354 Brichar Way, Columbus, Ohio",
+       TRUE ~ residential_address
+       ), 
      address_use = case_when(
-     is.na(address_use) ~ str_glue("{address}, {city}, CA"),
+      is.na(address_use) ~ str_glue("{address}, {city}, CA"),
      str_detect(address_use, "2 Gold St Apt 911, New York, CA") == TRUE 
      ~ "2 Gold St Apt 911, New York, New York",
-     str_detect(address_use, "3354 Brichar Way") == TRUE 
-     ~ "3354 Brichar Way, Columbus, Ohio",
-     str_detect(address_use, ",") == FALSE ~ str_glue("{address}, {city}, CA"),
-     TRUE ~ address_use
-  )) %>% 
-  drop_na(address_use) %>% 
+      str_detect(address_use, ",") == FALSE ~ str_glue("{address}, {city}, CA"),
+      TRUE ~ address_use
+   )) %>% 
+   drop_na(address_use) %>% 
   mutate_geocode(address_use, output = "latlona") %>% 
-  mutate(
-    city_use = address1
-  )
-  
+ separate(address1, c("address_street_use", "address_city_use", "state_zip", "address_country_use"), ",") %>%
+ mutate(
+     address_state_use = str_extract(state_zip, "\\w+"), 
+     address_zip_use = str_extract(state_zip, "\\d+")
+     )
+   
 
 
 #The numbers for 42 addresses match - 10 do not 
@@ -382,26 +393,25 @@ leaflet(address_check) %>%
 ```
 
 ```{r}
-data %>% 
-  filter(!is.na(hospital_name_e )) %>% 
-  select(hospital_name_e, hospital_loc_e)
+address_check %>% 
+  #separate(address1, c("street_use", "city_use", "state_zip", "country_use"), ",") %>%
+  mutate(
+    state_use = str_extract(state_zip, "\\w+"), 
+    zip_use = str_extract(state_zip, "\\d+")
+    ) %>% 
+  select(street_use, city_use, state_zip, state_use, zip_use, state_zip, country_use) 
 
-data %>% 
-  filter(!is.na(n_trips_e)) %>% 
-  select(n_trips_e, trip1_location_e)
 
-data %>% 
-  filter(str_detect(study_interest_e, "yes|Yes")) %>% 
-  select(study_interest_e , email) %>% 
-  write_csv("/Users/ChrisLeBoa/Downloads/emails.csv")
+
 ```
+```{r}
+address_check
+```
+
+
 
 ```{r}
 address_check %>% 
-  count(travel_california_los_angeles)
-
-
-address_check %>% 
-  write_csv(output_file)
+  write_csv("/Users/ChrisLeBoa/GitHub/corona_genomics/data/clean_travel_vars_20200914.csv")
 ```
 
